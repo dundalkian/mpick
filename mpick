@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+
+import io
+import os
+import sys
+import curses
+import curses.ascii
+import argparse
+import re
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='pick from a tui menu')
+    args = parser.parse_args()
+    return args
+
+# I'm not here to find clever, new fuzzy finder regex solutions.
+# This is the set of shoulders I stand on today:
+# https://blog.amjith.com/fuzzyfinder-in-10-lines-of-python
+# https://gist.github.com/amjith/a9e295e8dbff575c4cde#file-non_greedy_matching-py
+def fuzzy_filter(user_input, collection):
+    suggestions = []
+    pattern = '.*?'.join(user_input)   # Converts 'djm' to 'd.*?j.*?m'
+    regex = re.compile(pattern)  # Compiles a regex.
+    for item in collection:
+        match = regex.search(item)   # Checks if the current item matches the regex.
+        if match:
+            suggestions.append((len(match.group()), match.start(), item))
+    return [x for _, _, x in sorted(suggestions)]
+
+def update_loop(stdscr, input_list):
+    search_string = ""
+    selection_index = 0
+
+    while True:
+        stdscr.erase()
+        stdscr.refresh()
+        curses.update_lines_cols()
+        
+        stdscr.insstr(0, 0, f"Search string: {search_string}")
+        filtered_list = fuzzy_filter(search_string, input_list)[:curses.LINES - 2]
+        for i, entry in enumerate(filtered_list):
+            entry_attribute = curses.A_REVERSE if i == selection_index else curses.A_NORMAL
+            stdscr.insstr(i+2, 0, entry, entry_attribute)
+
+        char = stdscr.getch()
+
+        if curses.ascii.isprint(char):
+            search_string += chr(char)
+            selection_index = 0
+        # actual ascii values as follows: (8, 127, {system dependent})
+        elif char in (curses.ascii.BS, curses.ascii.DEL, curses.KEY_BACKSPACE):
+            search_string = search_string[:-1]
+            selection_index = 0
+        elif char == curses.ascii.NL:
+            return filtered_list[selection_index]
+        elif char == curses.KEY_UP:
+            selection_index = (selection_index - 1) % len(filtered_list)
+        elif char == curses.KEY_DOWN:
+            selection_index = (selection_index + 1) % len(filtered_list)
+        elif char == 27: # ALT was pressed ... Vim navigation via ALT+{j/k}
+            stdscr.nodelay(True)
+            ch2 = stdscr.getch()
+            if ch2 == -1:
+                pass
+            else:
+                if chr(ch2) == 'j':
+                    selection_index = (selection_index + 1) % len(filtered_list)
+                elif chr(ch2) == 'k':
+                    selection_index = (selection_index - 1) % len(filtered_list)
+            stdscr.nodelay(False)
+
+def main():
+    stdin = io.TextIOWrapper(sys.stdin.buffer, 'utf8', 'replace')
+    args = stdin.read().splitlines()
+    try:
+        prev_stdin = os.dup(0)
+        stdin = open("/dev/tty")
+        os.dup2(stdin.fileno(), 0)
+        result = curses.wrapper(update_loop, args)
+    finally:
+        os.dup2(prev_stdin, 0)
+        print(result)
+
+if __name__ == '__main__':
+    main()
