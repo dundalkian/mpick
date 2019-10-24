@@ -74,11 +74,15 @@ def main():
     args = stdin.read().splitlines()
     try:
         prev_stdin = os.dup(0)
+        prev_stdout = os.dup(1)
         stdin = open("/dev/tty")
+        stdout = open("/dev/tty", "w")
         os.dup2(stdin.fileno(), 0)
+        os.dup2(stdout.fileno(), 1)
         result = curses.wrapper(update_loop, args)
     finally:
         os.dup2(prev_stdin, 0)
+        os.dup2(prev_stdout, 1)
         print(result)
 
 if __name__ == '__main__':
